@@ -3,7 +3,7 @@ import os
 from corpus.corpus_manager import CorpusManager
 from engine import FuzzEngine
 from target.stdio import NodeStdioTarget
-from coverage.v8 import V8CoverageCollector
+from cov.v8 import V8CoverageCollector
 from strategies.base import MutationScheduler
 from strategies.semantic import SemanticCompliance, SemanticViolation
 

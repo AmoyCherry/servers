@@ -5,7 +5,7 @@ from typing import List
 from corpus.corpus_manager import CorpusManager
 # Absolute imports (assuming running via python3 main.py from fuzzer/ dir)
 from target.base import TargetConnection
-from coverage.base import CoverageCollector
+from cov.base import CoverageCollector
 from strategies.base import MutationScheduler
 
 
