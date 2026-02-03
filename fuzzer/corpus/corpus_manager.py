@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 class CorpusManager:
     def __init__(self, corpus_dir: str):
         self.corpus_dir = corpus_dir
-        # Ensure directory exists
+        # This recursively creates fuzzer/corpus/{target_name}/
         os.makedirs(self.corpus_dir, exist_ok=True)
 
     def load_corpus(self) -> List[List[Dict[str, Any]]]:
