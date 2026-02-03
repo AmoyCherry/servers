@@ -1,12 +1,12 @@
 import random
 import time
+import sys
 from typing import List
 
-from corpus.corpus_manager import CorpusManager
-# Absolute imports (assuming running via python3 main.py from fuzzer/ dir)
 from target.base import TargetConnection
 from cov.base import CoverageCollector
 from strategies.base import MutationScheduler
+from corpus.corpus_manager import CorpusManager
 
 
 class FuzzEngine:
@@ -23,20 +23,28 @@ class FuzzEngine:
         self.start_time = time.time()
 
     def bootstrap(self):
-        """Loads the corpus from disk."""
         self.corpus = self.corpus_manager.load_corpus()
 
     def run(self):
-        print("[*] Starting infinite fuzzing loop (Press Ctrl+C to stop)...")
+        print("[*] Starting fuzzing loop...")
 
         if not self.target.start():
-            print("[!] Target failed to start")
+            print("[!] Target failed to start initially.")
             return
 
-        # Sanity check: We need at least one seed
+        # Fallback if corpus is empty
         if not self.corpus:
-            print("[!] Error: Empty corpus! Please ensure seeds exist in the corpus directory.")
-            return
+            print("[!] Corpus is empty. Injecting handshake seed.")
+            self.corpus.append([{
+                "jsonrpc": "2.0",
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "fuzzer"}
+                },
+                "id": 1
+            }])
 
         last_dump_time = time.time()
         total_executions = 0
@@ -44,49 +52,65 @@ class FuzzEngine:
         try:
             while True:
                 # 1. Selection
-                parent = random.choice(self.corpus)
+                if not self.corpus:
+                    parent = []
+                else:
+                    parent = random.choice(self.corpus)
 
                 # 2. Mutation
                 child_sequence = self.scheduler.mutate(parent)
 
                 # 3. Execution
-                # Optimization: We assume persistent session state.
-                # We only send the newly appended message from the sequence.
                 last_msg = child_sequence[-1]
 
-                if self.target.send_message(last_msg):
-                    # Consume response to keep the pipe clear
-                    self.target.read_message()
-                    total_executions += 1
-                else:
-                    print("[!] Failed to send message (Process might be dead)")
-                    break
+                # A. Send Message
+                if not self.target.send_message(last_msg):
+                    print(f"\n[!] Send failed (Broken Pipe). Restarting target...")
+                    self.target.stop()
+                    self.target.start()
+                    continue
+
+                # --- CRITICAL FIX START ---
+                # B. Read Response
+                response = self.target.read_message()
+
+                # If response is None, the server CRASHED.
+                # We MUST restart and CANNOT count this as an execution.
+                if response is None:
+                    print(f"\n[!] Target Crashed (Empty Response). Restarting...")
+                    self.target.stop()
+                    self.target.start()
+                    continue
+                    # --- CRITICAL FIX END ---
+
+                # Only increment if the exchange was successful
+                total_executions += 1
 
                 # 4. Feedback (Time-based: Every 10 seconds)
                 current_time = time.time()
                 if current_time - last_dump_time >= 10:
-                    if self.target.trigger_coverage_dump():
-                        new_edges = self.collector.collect_new_edges()
-
-                        # log to console
-                        log = f"\n[*] Time: {time.strftime('%D:%H:%M:%S')}    Exec: {total_executions}   Total: {len(self.collector.global_edges)}   New: {len(new_edges)}"
-                        print(log)
-
-                        # --- PERSISTENCE LOGIC ---
-                        # 1. Update Memory
-                        self.corpus.append(child_sequence)
-                        # 2. Update Disk
-                        filename = self.corpus_manager.save_seed(child_sequence)
-                        print(f"    Saved interesting seed to: {filename}")
-                        # -------------------------
-                    else:
-                        print("[!] Coverage dump failed or timed out.")
-
+                    self._handle_coverage_dump(total_executions, child_sequence)
                     last_dump_time = current_time
 
         except KeyboardInterrupt:
             print("\n[*] Stopping Fuzzer...")
         finally:
             self.target.stop()
-            print(
-                f"[*] Final Statistics: {total_executions} executions, {len(self.collector.global_edges)} total blocks covered.")
+            print(f"[*] Final Statistics: {total_executions} executions.")
+
+    def _handle_coverage_dump(self, executions, current_sequence):
+        timestamp = time.strftime('%H:%M:%S')
+        if self.target.trigger_coverage_dump():
+            new_edges = self.collector.collect_new_edges()
+            count_new = len(new_edges)
+            total_edges = len(self.collector.global_edges)
+
+            print(f"[*] Time: {timestamp}    Exec: {executions}    Total: {total_edges}    New: {count_new}")
+
+            if count_new > 0:
+                print(f"[+] Found {count_new} new blocks!")
+                self.corpus.append(current_sequence)
+                filename = self.corpus_manager.save_seed(current_sequence)
+                print(f"    Saved interesting seed to: {filename}")
+        else:
+            print(f"[*] Time: {timestamp}    Exec: {executions}    [!] Dump Failed (Target Busy/Dead)")

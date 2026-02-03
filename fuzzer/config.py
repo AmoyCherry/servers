@@ -20,11 +20,11 @@ class ToolConfig:
         if language == "node":
             self.hook_path = os.path.join(REPO_ROOT, hook_path or "src/everything/cov-hook.cjs")
             # Node usually dumps to the CWD of the server
-            self.coverage_file = coverage_file or "coverage/runtime-dump.json"
+            self.coverage_file = os.path.join(REPO_ROOT, coverage_file or "coverage/runtime-dump.json")
         elif language == "python":
             # Python usually runs via 'uv' or direct python execution
             self.hook_path = None  # Python coverage handled via CLI wrapper
-            self.coverage_file = coverage_file or ".coverage"
+            self.coverage_file = os.path.join(REPO_ROOT, coverage_file or ".coverage")
 
 
 # Registry of the 7 common targets
