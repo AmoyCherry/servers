@@ -46,7 +46,7 @@ def main():
 
     # 2. Setup Strategies
     scheduler = MutationScheduler()
-    scheduler.register(SemanticCompliance(["list_files", "read_file"]), weight=80)
+    scheduler.register(SemanticCompliance(), weight=80)
     scheduler.register(SemanticViolation(), weight=20)
 
     # 3. Setup Corpus (Target Specific!)

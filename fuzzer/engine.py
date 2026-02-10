@@ -21,6 +21,12 @@ class FuzzEngine:
         self.corpus_manager = corpus_manager
         self.corpus = []
         self.start_time = time.time()
+        self._request_id = 0
+        self._initialized = False
+
+    def _next_id(self) -> int:
+        self._request_id += 1
+        return self._request_id
 
     def bootstrap(self):
         self.corpus = self.corpus_manager.load_corpus()
@@ -31,20 +37,6 @@ class FuzzEngine:
         if not self.target.start():
             print("[!] Target failed to start initially.")
             return
-
-        # Fallback if corpus is empty
-        if not self.corpus:
-            print("[!] Corpus is empty. Injecting handshake seed.")
-            self.corpus.append([{
-                "jsonrpc": "2.0",
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "fuzzer"}
-                },
-                "id": 1
-            }])
 
         last_dump_time = time.time()
         total_executions = 0
@@ -61,30 +53,44 @@ class FuzzEngine:
                 child_sequence = self.scheduler.mutate(parent)
 
                 # 3. Execution
-                last_msg = child_sequence[-1]
+                # Execute full sequence, not just last message
+                for msg in child_sequence:
+                    method = msg.get("method")
 
-                # A. Send Message
-                if not self.target.send_message(last_msg):
-                    print(f"\n[!] Send failed (Broken Pipe). Restarting target...")
-                    self.target.stop()
-                    self.target.start()
-                    continue
+                    # Skip initialize if we've already done it this session
+                    if method == "initialize" and self._initialized:
+                        continue
 
-                # --- CRITICAL FIX START ---
-                # B. Read Response
-                response = self.target.read_message()
+                    # Force unique id for every message sent
+                    msg = dict(msg)
+                    msg["id"] = self._next_id()
 
-                # If response is None, the server CRASHED.
-                # We MUST restart and CANNOT count this as an execution.
-                if response is None:
-                    print(f"\n[!] Target Crashed (Empty Response). Restarting...")
-                    self.target.stop()
-                    self.target.start()
-                    continue
-                    # --- CRITICAL FIX END ---
+                    if not self.target.send_message(msg):
+                        print(f"\n[!] Send failed (Broken Pipe). Restarting target...")
+                        self.target.stop()
+                        self.target.start()
+                        self._initialized = False
+                        break
 
-                # Only increment if the exchange was successful
-                total_executions += 1
+                    response = None
+                    for _ in range(3):  # retry up to 3 times
+                        response = self.target.read_message(expected_id=msg["id"], timeout_sec=2.0)
+                        if response is not None:
+                            break
+
+                    if response is None:
+                        # print(f"\n[!] Target Unresponsive (Empty Response/Timeout). Restarting...")
+                        # self.target.stop()
+                        # self.target.start()
+                        # self._initialized = False
+                        break
+
+                    if method == "initialize":
+                        self._initialized = True
+
+                else:
+                    # Only count if the whole sequence ran successfully
+                    total_executions += 1
 
                 # 4. Feedback (Time-based: Every 10 seconds)
                 current_time = time.time()

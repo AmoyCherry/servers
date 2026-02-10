@@ -74,24 +74,24 @@ class SeedGenerator:
 
     def _send_and_wait(self, msg):
         self.target.send_message(msg)
-        return self.target.read_message()
+        return self.target.read_message(expected_id=msg["id"], timeout_sec=1.0)
 
     def _discover_capabilities(self):
         # Fetch Tools
         self.target.send_message({"jsonrpc": "2.0", "method": "tools/list", "id": 2})
-        resp = self.target.read_message()
+        resp = self.target.read_message(expected_id=2, timeout_sec=1.0)
         if resp and "result" in resp:
             self.schemas["tools"] = resp["result"].get("tools", [])
 
         # Fetch Resources
         self.target.send_message({"jsonrpc": "2.0", "method": "resources/list", "id": 3})
-        resp = self.target.read_message()
+        resp = self.target.read_message(expected_id=3, timeout_sec=1.0)
         if resp and "result" in resp:
             self.schemas["resources"] = resp["result"].get("resources", [])
 
         # Fetch Prompts
         self.target.send_message({"jsonrpc": "2.0", "method": "prompts/list", "id": 4})
-        resp = self.target.read_message()
+        resp = self.target.read_message(expected_id=4, timeout_sec=1.0)
         if resp and "result" in resp:
             self.schemas["prompts"] = resp["result"].get("prompts", [])
 

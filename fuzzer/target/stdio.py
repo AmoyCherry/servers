@@ -54,11 +54,33 @@ class NodeStdioTarget(TargetConnection):
         except Exception:
             return False
 
-    def read_message(self):
+    def read_message(self, expected_id: int, timeout_sec: float = 1.0):
         try:
-            line = self.process.stdout.readline()
-            if not line: return None
-            return json.loads(line)
+            if self.process.poll() is not None:
+                return None
+
+            deadline = time.time() + timeout_sec
+
+            while time.time() < deadline:
+                remaining = max(0.0, deadline - time.time())
+                rlist, _, _ = select.select([self.process.stdout], [], [], remaining)
+                if not rlist:
+                    return None
+
+                line = self.process.stdout.readline()
+                if not line:
+                    return None
+
+                msg = json.loads(line)
+
+                # Ignore notifications
+                if "id" not in msg:
+                    continue
+
+                if msg.get("id") == expected_id:
+                    return msg
+
+            return None
         except:
             return None
 
